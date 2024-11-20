@@ -1,0 +1,108 @@
+library(sf)
+library(ggplot2)
+library(dplyr)
+library(ggrepel)
+library(scales)
+
+setwd(dirname(rstudioapi::getSourceEditorContext()$path))
+getwd()
+
+#País
+#d0 = readRDS("gadm36_GTM_0_sf.rds")
+
+#Por departamento
+#d1 = readRDS("gadm36_GTM_1_sf.rds")
+
+#Por Municipio
+d2 = readRDS("gadm36_GTM_2_sf.rds")
+
+#Dataframe de prueba
+pnts <- data.frame(
+  "LONGITUD" = c(-90.5151081, -90.5135258, -90.4123042),
+  "LATITUD" = c(14.5994794, 14.607761, 14.5459291))
+
+#Convertir coordenadas del dataframe a planar
+pnts_sf <- do.call("st_sfc",c(lapply(1:nrow(pnts), 
+                                     function(i) {st_point(as.numeric(pnts[i, ]))}), list("crs" = 4326)))
+pnts_trans <- st_transform(pnts_sf, 2163)
+
+#Convertir coordenadas del mapa a planar
+tt1_trans <- st_transform(d2, 2163)
+
+#Colocar puntos de coordenadas en municipios
+pnts$GID_2 <- apply(st_intersects(tt1_trans, pnts_trans, sparse = FALSE), 2, 
+                     function(col) { 
+                       tt1_trans[which(col), ]$GID_2
+                     })
+
+#Convertir mapa en dataframe para hacer join y obtener nombres de deptos y munis
+d2_df = d2 %>% st_drop_geometry()
+pnts = pnts %>% inner_join(d2_df[c("GID_2","NAME_2","GID_1","NAME_1")],by="GID_2")
+
+#Graficar puntos sobre depto de Guate
+ggplot(d2[d2$NAME_1 == "Guatemala",]) +
+  geom_sf() +
+  geom_point(data=pnts[pnts$NAME_1 == "Guatemala"], 
+             aes(x=LONGITUD, y=LATITUD), colour="Dark Blue", 
+             fill="Green",pch=21, size=5, alpha=I(0.7))
+
+#Agrupar puntos por municipio
+pnts_grouped <- pnts %>% group_by(GID_1,GID_2) %>% tally(name = "conteo")
+
+#Agregar conteo de puntos al mapa
+d2_ext <- d2 %>% left_join(pnts_grouped[c("GID_2","conteo")], by="GID_2")
+#d2_ext$conteo = coalesce(d2_ext$conteo,0)
+
+#Colores
+polygons_fill <- "#D9D9D9"
+polygons_line <- "#0070C0"
+text_color <- "#005472"
+polygons_fill_continuous <-  scale_fill_gradient(
+  low = "#99FF99",
+  high = "#1F5611",
+  label = scales::comma,
+  na.value = "white")
+
+#Sección del mapa a graficar
+d2_graph = d2_ext[d2_ext$NAME_1 == "Guatemala",]
+d2_graph$conteo = coalesce(d2_graph$conteo,0)
+d2_graph$num = 1:nrow(d2_graph)
+#d2_graph = d2_ext
+
+#Mapa como tal
+d2_graph %>%
+  #mutate(
+  #  population = format(
+  #    round(coalesce(conteo,0)),
+  #    big.mark = ",")
+  #) %>%
+  ggplot() +
+  geom_sf(aes(fill = conteo), color = polygons_line) +
+    polygons_fill_continuous +
+  
+  ggrepel::geom_label_repel( # new labels: combination of population and the name 
+    aes(label = num, geometry = geometry),
+    stat = "sf_coordinates",
+    min.segment.length = 0,
+    label.size=NA,
+    color = text_color
+  ) +
+    theme(
+      axis.text = element_blank(),
+      axis.ticks = element_blank(),
+      legend.position = c(-0.3, 0),
+      legend.justification = c("left", "bottom"),
+      panel.background = element_blank(),
+      #panel.border = element_rect(color = "black", fill = NA)
+    ) +
+  labs(
+    fill = "conteo",
+    x = "",
+    y = ""
+  )
+
+
+
+
+
+
